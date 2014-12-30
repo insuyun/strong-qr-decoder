@@ -1,8 +1,13 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 
+import reedsolo
 import sys
 import argparse
+
+# number of bytes for bruteforcing
+BF_LIMIT = 3
+
 
 #位置合わせパターンの座標
 alignment_pattern_array = [
@@ -259,7 +264,7 @@ def checkFinder(data, xoffset, yoffset):
 
 #ハミング距離算出
 def hammingDistance(s1, s2):
-    if len(s1) != len(s2):
+  if len(s1) != len(s2):
     sys.stderr.write(u'error: 文字列の長さが違います\n')
     sys.exit(1)
   r = 0
@@ -403,6 +408,49 @@ def calcSigma(sigmas, index):
     s ^= mulGF256(sigmas[-1 - i], index2vector(index * i))
   s ^= index2vector(index * len(sigmas))
   return s
+
+def brute_force(blocks, limit_error_correction, unknown_code_nums, unknown_indexes, verbose):
+    brute_range = unknown_code_nums - limit_error_correction_num
+    assert(brute_range <= BF_LIMIT)
+    assert(len(unknown_indexes) >= brute_range)
+
+    target_indexes = unknown_indexes[0:brute_range]
+
+    if verbose:
+      print '[*] start bruteforce(%d bytes)' % brute_range
+      print '[*] target indexes' + repr(target_indexes)
+
+
+    # reverse for using reedsolomon module
+    blocks.reverse()
+    target_indexes = map(lambda x:len(blocks) - 1 - x, target_indexes)
+
+    brute_bytes_range = 1 << 8 * brute_range
+    for i in xrange(brute_bytes_range):
+        candidates = i
+        for j in xrange(brute_range):
+            blocks[target_indexes[j]] = candidates % 0x100
+            candidates >>= 8
+        try:
+            # is it always true?
+            rs = reedsolo.RSCodec(limit_error_correction_num * 2)
+            #print repr(bytearray(blocks))
+            corrected = rs.encode(rs.decode(bytearray(blocks)))
+            assert(len(corrected) == len(blocks))
+            # only one solution is possible?
+            for i in xrange(len(blocks)):
+                blocks[i] = corrected[i]
+            blocks.reverse()
+            return
+
+        except Exception, e:
+            #raise
+            pass
+            #print bytearray(blocks)
+        if i % 0x1000 == 0 and verbose:
+            print "[*] processing 0x%x/0x%x" % (i, brute_bytes_range)
+
+    pass
 
 #メイン
 if __name__ == '__main__':
@@ -843,11 +891,16 @@ if __name__ == '__main__':
       print '{0}'.format(repr(RS_blocks[i]))
   #不明モジュールを含むコードワードの数を数える
   unknown_code_nums = []
+  unknown_code_indexes = []
   for bs in RS_blocks:
+    unknown_code_indexes.append([])
     s = 0
+    index = 0
     for c in bs:
       if '?' in c:
         s += 1
+        unknown_code_indexes[-1].append(index)
+      index += 1
     unknown_code_nums.append(s)
   if args.verbose:
     print u'各RSブロック中の不明データコード数: {0}'.format(repr(unknown_code_nums))
@@ -879,9 +932,13 @@ if __name__ == '__main__':
       print u'\nRSブロック {0}'.format(i)
     #不明モジュール数が誤り訂正数を超えていた場合は訂正不能
     if limit_error_correction_num < unknown_code_nums[i]:
-      if args.verbose:
-        print u'不明モジュールを含むブロック数が(最大)誤り訂正数を超えています'
-      continue
+      if limit_error_correction_num >= unknown_code_nums[i] - BF_LIMIT:
+        brute_force(RS_blocks[i], limit_error_correction_num, unknown_code_nums[i], unknown_code_indexes[i], args.verbose)
+        print RS_blocks[i]
+      else:
+        if args.verbose:
+          print u'不明モジュールを含むブロック数が(最大)誤り訂正数を超えています'
+          continue
     #シンドロームの計算
     syndrome_length = (len(blocks) - offset) // block_num #誤り訂正数、len(syndromes)
     if args.verbose:
