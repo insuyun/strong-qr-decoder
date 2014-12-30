@@ -934,7 +934,6 @@ if __name__ == '__main__':
     if limit_error_correction_num < unknown_code_nums[i]:
       if limit_error_correction_num >= unknown_code_nums[i] - BF_LIMIT:
         brute_force(RS_blocks[i], limit_error_correction_num, unknown_code_nums[i], unknown_code_indexes[i], args.verbose)
-        print RS_blocks[i]
       else:
         if args.verbose:
           print u'不明モジュールを含むブロック数が(最大)誤り訂正数を超えています'
